@@ -1,34 +1,125 @@
+import { Router } from 'itty-router';
+import jwt from 'jsonwebtoken';
 
-## Simple Cloudflare app
-The goal is to build the backend of a `Blogging Platform`. 
-It NEEDS to work in a serverless environment (preferably use cloudflare workers)
+const router = Router();
+const secret = 'your_secret_key'; // Use an environment variable in production
 
-### User Management Endpoints:
- - POST /users/signup - User registration.
-Inputs: username, email, password
-Actions: Create a new user account. Perform validations and return a success message or error messages (e.g., email already in use, password requirements not met).
+// User Management
+const users = new Map(); // Replace with KV or Durable Objects in production
+const posts = new Map(); // Replace with KV or Durable Objects in production
 
- - POST /users/signin - User login.
-Inputs: email, password
-Actions: Authenticate the user. Return a token (JWT) for authorization in subsequent requests if successful, or an error message if authentication fails.
-Blog Platform Endpoints:
+// Helper functions
+function generateToken(user) {
+    return jwt.sign({ id: user.id }, secret, { expiresIn: '1h' });
+}
 
- - GET /posts - Retrieve all blog posts.
-Actions: Fetch a list of all blog posts. Can be public or user-specific based on authentication.
+function verifyToken(token) {
+    try {
+        return jwt.verify(token, secret);
+    } catch (e) {
+        return null;
+    }
+}
 
- - POST /posts - Create a new blog post.
-Inputs: title, body
-Actions: Create a new blog post associated with the authenticated user. Require authentication.
+// Middleware to protect routes
+async function authenticate(request) {
+    const token = request.headers.get('Authorization')?.split(' ')[1];
+    if (!token) return null;
+    return verifyToken(token);
+}
 
- - GET /posts/:id - Retrieve a single blog post by ID.
-Actions: Fetch details of a specific blog post. Can be public or have additional details/edit capabilities for the owner.
+// User Signup
+router.post('/users/signup', async (request) => {
+    const { username, email, password } = await request.json();
 
- - PUT /posts/:id - Update a blog post by ID.
-Inputs: title, body
-Actions: Update the specified blog post if the authenticated user is the owner. Require authentication.
+    if (users.has(email)) {
+        return new Response('Email already in use.', { status: 400 });
+    }
+    
+    // Store hashed password in a real app
+    const userId = Date.now(); // Simple unique ID generation
+    users.set(email, { id: userId, username, email, password });
+    
+    return new Response('User created successfully.', { status: 201 });
+});
 
- - DELETE /posts/:id - Delete a blog post by ID.
-Actions: Delete the specified blog post if the authenticated user is the owner. Require authentication.
+// User Signin
+router.post('/users/signin', async (request) => {
+    const { email, password } = await request.json();
+    const user = users.get(email);
 
-## Database
-Try using `prisma` as the ORM and Postgres as the provider.
+    if (!user || user.password !== password) {
+        return new Response('Invalid credentials.', { status: 401 });
+    }
+
+    const token = generateToken(user);
+    return new Response(JSON.stringify({ token }), { status: 200 });
+});
+
+// Get All Posts
+router.get('/posts', async (request) => {
+    const authUser = await authenticate(request);
+    const userPosts = [...posts.values()].filter(post => !post.userId || post.userId === authUser?.id);
+    return new Response(JSON.stringify(userPosts), { status: 200 });
+});
+
+// Create Post
+router.post('/posts', async (request) => {
+    const authUser = await authenticate(request);
+    if (!authUser) return new Response('Unauthorized.', { status: 401 });
+
+    const { title, body } = await request.json();
+    const postId = Date.now();
+    posts.set(postId, { id: postId, title, body, userId: authUser.id });
+
+    return new Response('Post created successfully.', { status: 201 });
+});
+
+// Get Single Post
+router.get('/posts/:id', async (request) => {
+    const postId = request.params.id;
+    const post = posts.get(postId);
+
+    if (!post) return new Response('Post not found.', { status: 404 });
+    return new Response(JSON.stringify(post), { status: 200 });
+});
+
+// Update Post
+router.put('/posts/:id', async (request) => {
+    const authUser = await authenticate(request);
+    if (!authUser) return new Response('Unauthorized.', { status: 401 });
+
+    const postId = request.params.id;
+    const post = posts.get(postId);
+
+    if (!post || post.userId !== authUser.id) {
+        return new Response('Post not found or unauthorized.', { status: 403 });
+    }
+
+    const { title, body } = await request.json();
+    posts.set(postId, { ...post, title, body });
+    return new Response('Post updated successfully.', { status: 200 });
+});
+
+// Delete Post
+router.delete('/posts/:id', async (request) => {
+    const authUser = await authenticate(request);
+    if (!authUser) return new Response('Unauthorized.', { status: 401 });
+
+    const postId = request.params.id;
+    const post = posts.get(postId);
+
+    if (!post || post.userId !== authUser.id) {
+        return new Response('Post not found or unauthorized.', { status: 403 });
+    }
+
+    posts.delete(postId);
+    return new Response('Post deleted successfully.', { status: 200 });
+});
+
+// Default Route
+router.all('*', () => new Response('Not Found', { status: 404 }));
+
+addEventListener('fetch', event => {
+    event.respondWith(router.handle(event.request));
+});

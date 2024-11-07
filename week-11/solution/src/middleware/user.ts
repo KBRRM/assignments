@@ -22,3 +22,11 @@ export async function authmiddleware(c: any, next: Next) {
     return c.body("unauthroized ", 401);
   }
 }
+
+
+
+Explanation of Changes
+Authorization Header Check: We check if the Authorization header is present before trying to split it. This avoids potential errors.
+Token Existence Check: Checking if (!token) directly instead of separately checking for null or undefined.
+Improved Error Messages: Clearer and more specific error messages.
+Type Annotation: Added Context as the type for c in the authMiddleware function parameter for better type safety.

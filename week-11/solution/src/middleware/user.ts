@@ -1,24 +1,28 @@
 import { Context, Next } from "hono";
-import { env } from "hono/adapter";
 import { Jwt } from "hono/utils/jwt";
 
-export async function authmiddleware(c: any, next: Next) {
+export async function authMiddleware(c: Context, next: Next) {
   const JWT_TOKEN = "mytoken";
   
   try {
-    const token: string = c.req.header("Authorization").split(" ")[1];
-    if (token !== null || token !== undefined) {
-      const decode = await Jwt.verify(token, JWT_TOKEN);
-      if (decode) {
-        c.set("userId", decode);
-        await next();
-      } else {
-        return c.body("you are unauthroized user sorry", 401);
-      }
+    const authHeader = c.req.header("Authorization");
+    if (!authHeader) {
+      return c.body("Authorization header missing", 401);
+    }
+
+    const token = authHeader.split(" ")[1];
+    if (!token) {
+      return c.body("Token missing in Authorization header", 401);
+    }
+
+    const decoded = await Jwt.verify(token, JWT_TOKEN);
+    if (decoded) {
+      c.set("userId", decoded);
+      return next();
     } else {
-      return c.body("you are unauthroized user", 401);
+      return c.body("Unauthorized user", 401);
     }
   } catch (error) {
-    return c.body("unauthroized ", 401);
+    return c.body("Unauthorized due to invalid token", 401);
   }
 }
